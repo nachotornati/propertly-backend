@@ -12,24 +12,69 @@ import java.util.*;
 public class AdminController {
 
     public void register(Javalin app) {
+        app.get("/admin/login",    this::loginForm);
+        app.post("/admin/login",   this::loginSubmit);
+        app.get("/admin/logout",   this::logout);
         app.get("/admin/dashboard", this::dashboard);
     }
 
-    private void dashboard(Context ctx) {
+    private String sessionToken() {
+        String u = System.getenv().getOrDefault("ADMIN_USER", "admin");
+        String p = System.getenv().getOrDefault("ADMIN_PASS", "propertly");
+        return Base64.getEncoder().encodeToString((u + ":" + p).getBytes());
+    }
+
+    private void loginForm(Context ctx) {
+        String err = ctx.queryParam("error") != null ? "<p class='err'>Usuario o contraseña incorrectos</p>" : "";
+        ctx.contentType("text/html; charset=utf-8").result("""
+            <!DOCTYPE html><html lang="es"><head>
+            <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+            <title>Propertly Admin</title>
+            <style>
+              *{box-sizing:border-box;margin:0;padding:0}
+              body{font-family:-apple-system,sans-serif;background:#f8fafc;display:flex;align-items:center;justify-content:center;min-height:100vh}
+              .box{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:32px;width:320px}
+              h1{font-size:18px;font-weight:700;color:#1e293b;margin-bottom:24px}
+              label{display:block;font-size:12px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+              input{width:100%%;padding:9px 12px;border:1px solid #e2e8f0;border-radius:8px;font-size:14px;margin-bottom:14px;outline:none}
+              input:focus{border-color:#2b3ef5}
+              button{width:100%%;padding:10px;background:#2b3ef5;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer}
+              button:hover{background:#2130e0}
+              .err{color:#dc2626;font-size:13px;margin-bottom:14px}
+            </style></head>
+            <body><div class="box">
+              <h1>Propertly Admin</h1>
+              %s
+              <form method="POST" action="/admin/login">
+                <label>Usuario</label><input name="user" type="text" autofocus autocomplete="username">
+                <label>Contraseña</label><input name="pass" type="password" autocomplete="current-password">
+                <button type="submit">Ingresar</button>
+              </form>
+            </div></body></html>""".formatted(err));
+    }
+
+    private void loginSubmit(Context ctx) {
         String adminUser = System.getenv().getOrDefault("ADMIN_USER", "admin");
         String adminPass = System.getenv().getOrDefault("ADMIN_PASS", "propertly");
-
-        String authHeader = ctx.header("Authorization");
-        if (authHeader == null || !authHeader.startsWith("Basic ")) {
-            ctx.header("WWW-Authenticate", "Basic realm=\"Propertly Admin\"");
-            ctx.status(401).result("Unauthorized");
-            return;
+        String user = ctx.formParam("user");
+        String pass = ctx.formParam("pass");
+        if (adminUser.equals(user) && adminPass.equals(pass)) {
+            ctx.cookie("admin_session", sessionToken(), 86400); // 24h
+            ctx.redirect("/admin/dashboard");
+        } else {
+            ctx.redirect("/admin/login?error=1");
         }
-        String decoded = new String(Base64.getDecoder().decode(authHeader.substring(6)));
-        String[] parts = decoded.split(":", 2);
-        if (parts.length != 2 || !parts[0].equals(adminUser) || !parts[1].equals(adminPass)) {
-            ctx.header("WWW-Authenticate", "Basic realm=\"Propertly Admin\"");
-            ctx.status(401).result("Unauthorized");
+    }
+
+    private void logout(Context ctx) {
+        ctx.removeCookie("admin_session");
+        ctx.redirect("/admin/login");
+    }
+
+    private void dashboard(Context ctx) {
+        String session = ctx.cookie("admin_session");
+        if (session == null || !session.equals(sessionToken())) {
+            ctx.redirect("/admin/login");
             return;
         }
 
