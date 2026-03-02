@@ -18,12 +18,6 @@ public class AdminController {
         app.get("/admin/dashboard", this::dashboard);
     }
 
-    private String sessionToken() {
-        String u = System.getenv().getOrDefault("ADMIN_USER", "admin");
-        String p = System.getenv().getOrDefault("ADMIN_PASS", "propertly");
-        return Base64.getEncoder().encodeToString((u + ":" + p).getBytes());
-    }
-
     private void loginForm(Context ctx) {
         String err = ctx.queryParam("error") != null ? "<p class='err'>Usuario o contraseña incorrectos</p>" : "";
         ctx.contentType("text/html; charset=utf-8").result("""
@@ -59,7 +53,7 @@ public class AdminController {
         String user = ctx.formParam("user");
         String pass = ctx.formParam("pass");
         if (adminUser.equals(user) && adminPass.equals(pass)) {
-            ctx.cookie("admin_session", sessionToken(), 86400); // 24h
+            ctx.req().getSession().setAttribute("admin_logged_in", Boolean.TRUE);
             ctx.redirect("/admin/dashboard");
         } else {
             ctx.redirect("/admin/login?error=1");
@@ -67,13 +61,14 @@ public class AdminController {
     }
 
     private void logout(Context ctx) {
-        ctx.removeCookie("admin_session");
+        var s = ctx.req().getSession(false);
+        if (s != null) s.invalidate();
         ctx.redirect("/admin/login");
     }
 
     private void dashboard(Context ctx) {
-        String session = ctx.cookie("admin_session");
-        if (session == null || !session.equals(sessionToken())) {
+        var session = ctx.req().getSession(false);
+        if (session == null || !Boolean.TRUE.equals(session.getAttribute("admin_logged_in"))) {
             ctx.redirect("/admin/login");
             return;
         }
