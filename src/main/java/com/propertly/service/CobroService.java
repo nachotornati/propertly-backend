@@ -201,6 +201,9 @@ public class CobroService {
         List<CobroVencidoAnterior> result = new ArrayList<>();
         for (Property prop : properties) {
             LocalDate rangeStart = prop.mesInicio.withDayOfMonth(1);
+            // Never look back before the month the property was registered in the system
+            LocalDate createdMonth = prop.createdAt.toLocalDate().withDayOfMonth(1);
+            if (rangeStart.isBefore(createdMonth)) rangeStart = createdMonth;
             if (rangeStart.isBefore(lookbackStart)) rangeStart = lookbackStart;
 
             LocalDate month = rangeStart;
