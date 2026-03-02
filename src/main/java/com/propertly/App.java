@@ -41,6 +41,7 @@ public class App {
 
         // Auth middleware — protects all /api/* except /api/auth/* and /api/public/*
         app.before("/api/*", ctx -> {
+            if (ctx.method().name().equals("OPTIONS")) return;
             if (ctx.path().startsWith("/api/auth/")) return;
             if (ctx.path().startsWith("/api/public/")) return;
             String header = ctx.header("Authorization");
