@@ -25,8 +25,8 @@ public class Database {
             String pass = System.getenv().getOrDefault("DB_PASS", "postgres");
             jdbcUrl = "jdbc:postgresql://" + host + ":" + port + "/" + name + "?user=" + user + "&password=" + pass;
         } else if (!jdbcUrl.startsWith("jdbc:")) {
-            // Railway provides postgres:// format
-            jdbcUrl = jdbcUrl.replace("postgres://", "jdbc:postgresql://");
+            // Railway provides postgres:// or postgresql:// format
+            jdbcUrl = jdbcUrl.replaceFirst("^postgres(ql)?://", "jdbc:postgresql://");
         }
 
         HikariConfig config = new HikariConfig();
