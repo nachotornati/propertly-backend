@@ -45,6 +45,7 @@ public class TenantController {
             response.put("nextAdjustmentDate", prop.nextAdjustmentDate);
             response.put("ajusteInfo", prop.ajusteInfo);
             response.put("historialAjustes", prop.historialAjustes);
+            response.put("createdAt", prop.createdAt);
             response.put("cobros", cobros);
 
             ctx.json(response);
