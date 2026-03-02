@@ -20,7 +20,7 @@ public class App {
         int port = Integer.parseInt(System.getenv().getOrDefault("PORT", "8080"));
 
         Javalin app = Javalin.create(config -> {
-            config.jsonMapper(new JavalinJackson(mapper));
+            config.jsonMapper(new JavalinJackson(mapper, true));
             config.bundledPlugins.enableCors(cors -> {
                 cors.addRule(rule -> {
                     String allowedOrigin = System.getenv().getOrDefault("CORS_ORIGIN", "*");
