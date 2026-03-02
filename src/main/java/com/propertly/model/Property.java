@@ -23,6 +23,7 @@ public class Property {
     public LocalDate nextAdjustmentDate;
     public int daysUntilAdjustment;
     public boolean adjustmentDue;
+    public AjusteInfo ajusteInfo;
 
     public Property() {}
 }

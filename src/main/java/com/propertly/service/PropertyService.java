@@ -3,8 +3,10 @@ package com.propertly.service;
 import com.propertly.db.Database;
 import com.propertly.model.Property;
 
+import com.propertly.model.AjusteInfo;
 import java.sql.*;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
@@ -132,6 +134,15 @@ public class PropertyService {
             p.nextAdjustmentDate = calculateNextAdjustment(p.mesInicio, p.ajusteMeses);
             p.daysUntilAdjustment = (int) ChronoUnit.DAYS.between(LocalDate.now(), p.nextAdjustmentDate);
             p.adjustmentDue = p.daysUntilAdjustment <= 0;
+
+            // Calculate adjustment value using real ICL/IPC indices
+            if (p.indiceAjuste != null) {
+                YearMonth hastaMonth = YearMonth.from(p.nextAdjustmentDate);
+                YearMonth desdeMonth = hastaMonth.minusMonths(p.ajusteMeses);
+                p.ajusteInfo = IndiceService.getInstance()
+                        .calcularAjuste(p.indiceAjuste, desdeMonth, hastaMonth, p.precio)
+                        .orElse(null);
+            }
         }
 
         return p;
