@@ -21,7 +21,7 @@ public class PropertyService {
 
     private static final String SELECT_COLS = "id, agency_id, address, provincia, barrio, moneda, precio, mes_inicio, " +
             "ajuste_meses, duracion_meses, indice_ajuste, tenant_name, tenant_phone, tenant_email, tenant_factura, " +
-            "tenant_persona_juridica, tenant_documento, notes, created_at, tenant_token, " +
+            "tenant_persona_juridica, tenant_documento, unidad_funcional, notes, created_at, tenant_token, " +
             "precio_base_override, mes_base_override, historial_snapshot";
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
@@ -37,6 +37,30 @@ public class PropertyService {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     props.add(mapAndCalculate(rs));
+                }
+            }
+        }
+        // Auto-advance mes_base_override for ARS properties when new index data allows it.
+        // Only advances forward, and never overwrites a manual price correction (precioBaseOverride).
+        for (Property p : props) {
+            if ("ARS".equals(p.moneda) && p.indiceAjuste != null
+                    && p.precioBaseOverride == null
+                    && p.nextAdjustmentDate != null
+                    && p.historialAjustes != null && !p.historialAjustes.isEmpty()) {
+                LocalDate expectedBase = p.nextAdjustmentDate.minusMonths(p.ajusteMeses);
+                boolean needsAdvance = p.mesBaseOverride == null
+                        || expectedBase.isAfter(p.mesBaseOverride);
+                if (needsAdvance) {
+                    try {
+                        String upd = "UPDATE properties SET mes_base_override = ? WHERE id = ?::uuid";
+                        try (Connection c2 = Database.getConnection();
+                             PreparedStatement ps2 = c2.prepareStatement(upd)) {
+                            ps2.setDate(1, Date.valueOf(expectedBase));
+                            ps2.setString(2, p.id);
+                            ps2.executeUpdate();
+                        }
+                        p.mesBaseOverride = expectedBase; // keep in-memory consistent
+                    } catch (Exception ignored) {}
                 }
             }
         }
@@ -80,21 +104,10 @@ public class PropertyService {
     }
 
     public Property create(Property prop) throws SQLException {
-        // If contract already started and user provided current price + next adjustment month, set overrides
-        if (prop.precioActualInput != null && prop.proximoMesAjusteInput != null && !prop.proximoMesAjusteInput.isBlank()) {
-            YearMonth proximoMes = YearMonth.parse(prop.proximoMesAjusteInput);
-            prop.mesBaseOverride = proximoMes.minusMonths(prop.ajusteMeses).atDay(1);
-            prop.precioBaseOverride = prop.precioActualInput;
-        }
-
-        boolean hasOverride = prop.precioBaseOverride != null && prop.mesBaseOverride != null;
         String sql = "INSERT INTO properties (agency_id, address, provincia, barrio, moneda, precio, mes_inicio, " +
                 "ajuste_meses, duracion_meses, indice_ajuste, tenant_name, tenant_phone, tenant_email, " +
-                "tenant_factura, tenant_persona_juridica, tenant_documento, notes" +
-                (hasOverride ? ", precio_base_override, mes_base_override, historial_snapshot" : "") +
-                ") VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?" +
-                (hasOverride ? ", ?, ?, ?::jsonb" : "") +
-                ") RETURNING id, created_at";
+                "tenant_factura, tenant_persona_juridica, tenant_documento, unidad_funcional, notes" +
+                ") VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at";
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, prop.agencyId);
@@ -116,12 +129,8 @@ public class PropertyService {
             if (prop.tenantPersonaJuridica != null) ps.setBoolean(15, prop.tenantPersonaJuridica);
             else ps.setNull(15, java.sql.Types.BOOLEAN);
             ps.setString(16, prop.tenantDocumento);
-            ps.setString(17, prop.notes);
-            if (hasOverride) {
-                ps.setBigDecimal(18, prop.precioBaseOverride);
-                ps.setDate(19, Date.valueOf(prop.mesBaseOverride));
-                ps.setString(20, "[]");
-            }
+            ps.setString(17, prop.unidadFuncional);
+            ps.setString(18, prop.notes);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     prop.id = rs.getString("id");
@@ -129,38 +138,40 @@ public class PropertyService {
                 }
             }
         }
+
+        // If the user indicates the next adjustment month, store mesBaseOverride so the
+        // adjustment cycle is anchored correctly. Price is auto-calculated (no precioBaseOverride).
+        if ("ARS".equals(prop.moneda) && prop.proximoMesAjusteInput != null) {
+            YearMonth proximoMes = YearMonth.parse(prop.proximoMesAjusteInput);
+            LocalDate mesBase = proximoMes.minusMonths(prop.ajusteMeses).atDay(1);
+            String updateSql = "UPDATE properties SET mes_base_override = ? WHERE id = ?::uuid";
+            try (Connection conn2 = Database.getConnection();
+                 PreparedStatement ps2 = conn2.prepareStatement(updateSql)) {
+                ps2.setDate(1, Date.valueOf(mesBase));
+                ps2.setString(2, prop.id);
+                ps2.executeUpdate();
+            }
+        }
+
         return findById(prop.id);
     }
 
     public Property update(String id, Property prop) throws SQLException {
         Property current = findById(id);
 
-        // Detect if adjustment settings changed — if so, freeze current historial to preserve past calculations
+        // Detect if adjustment settings changed
         boolean settingsChanged = current != null && "ARS".equals(current.moneda)
                 && current.indiceAjuste != null
                 && (prop.ajusteMeses != current.ajusteMeses
                     || !Objects.equals(prop.indiceAjuste, current.indiceAjuste));
 
-        java.math.BigDecimal newPrecioBase = null;
-        Date newMesBase = null;
-        String newHistorialJson = null;
-
-        if (settingsChanged && current.precioActual != null) {
-            newPrecioBase = current.precioActual;
-            newMesBase = Date.valueOf(LocalDate.now().withDayOfMonth(1));
-            try {
-                newHistorialJson = MAPPER.writeValueAsString(
-                        current.historialAjustes != null ? current.historialAjustes : new ArrayList<>());
-            } catch (Exception e) {
-                newHistorialJson = "[]";
-            }
-        }
-
         // moneda, precio, mes_inicio are NOT updated — locked after creation
+        // When adjustment settings change, clear overrides so history recalculates from scratch
         String sql = "UPDATE properties SET address = ?, provincia = ?, barrio = ?, " +
                 "ajuste_meses = ?, duracion_meses = ?, indice_ajuste = ?, tenant_name = ?, tenant_phone = ?, " +
-                "tenant_email = ?, tenant_factura = ?, tenant_persona_juridica = ?, tenant_documento = ?, notes = ?" +
-                (settingsChanged ? ", precio_base_override = ?, mes_base_override = ?, historial_snapshot = ?::jsonb" : "") +
+                "tenant_email = ?, tenant_factura = ?, tenant_persona_juridica = ?, tenant_documento = ?, " +
+                "unidad_funcional = ?, notes = ?" +
+                (settingsChanged ? ", precio_base_override = NULL, mes_base_override = NULL, historial_snapshot = NULL" : "") +
                 " WHERE id = ?::uuid";
 
         try (Connection conn = Database.getConnection();
@@ -180,18 +191,28 @@ public class PropertyService {
             if (prop.tenantPersonaJuridica != null) ps.setBoolean(11, prop.tenantPersonaJuridica);
             else ps.setNull(11, java.sql.Types.BOOLEAN);
             ps.setString(12, prop.tenantDocumento);
-            ps.setString(13, prop.notes);
-            if (settingsChanged) {
-                if (newPrecioBase != null) ps.setBigDecimal(14, newPrecioBase);
-                else ps.setNull(14, java.sql.Types.DECIMAL);
-                ps.setDate(15, newMesBase);
-                ps.setString(16, newHistorialJson);
-                ps.setString(17, id);
-            } else {
-                ps.setString(14, id);
-            }
+            ps.setString(13, prop.unidadFuncional);
+            ps.setString(14, prop.notes);
+            ps.setString(15, id);
             ps.executeUpdate();
         }
+
+        // If user provides a corrected current price, override from the current cycle start.
+        // This runs AFTER settingsChanged may have cleared overrides, so it always wins.
+        // Use current.moneda (not prop.moneda) because moneda is locked and disabled fields may be null.
+        if (current != null && "ARS".equals(current.moneda) && prop.precioActualInput != null
+                && current.nextAdjustmentDate != null) {
+            LocalDate mesBase = current.nextAdjustmentDate.minusMonths(current.ajusteMeses);
+            String overrideSql = "UPDATE properties SET precio_base_override = ?, mes_base_override = ? WHERE id = ?::uuid";
+            try (Connection conn2 = Database.getConnection();
+                 PreparedStatement ps2 = conn2.prepareStatement(overrideSql)) {
+                ps2.setBigDecimal(1, prop.precioActualInput);
+                ps2.setDate(2, Date.valueOf(mesBase));
+                ps2.setString(3, id);
+                ps2.executeUpdate();
+            }
+        }
+
         return findById(id);
     }
 
@@ -224,6 +245,7 @@ public class PropertyService {
         boolean tf = rs.getBoolean("tenant_factura"); p.tenantFactura = rs.wasNull() ? null : tf;
         boolean tpj = rs.getBoolean("tenant_persona_juridica"); p.tenantPersonaJuridica = rs.wasNull() ? null : tpj;
         p.tenantDocumento = rs.getString("tenant_documento");
+        p.unidadFuncional = rs.getString("unidad_funcional");
         p.notes = rs.getString("notes");
         p.createdAt = rs.getTimestamp("created_at").toLocalDateTime();
         p.tenantToken = rs.getString("tenant_token");
@@ -236,7 +258,8 @@ public class PropertyService {
         p.historialSnapshotJson = rs.getString("historial_snapshot");
 
         if ("ARS".equals(p.moneda) && p.indiceAjuste != null) {
-            boolean hasOverride = p.precioBaseOverride != null && p.mesBaseOverride != null;
+            // hasOverride only needs mesBaseOverride; precioBaseOverride is optional (manual correction)
+            boolean hasOverride = p.mesBaseOverride != null;
             LocalDate baseDate = hasOverride ? p.mesBaseOverride : p.mesInicio;
 
             p.nextAdjustmentDate = calculateNextAdjustment(baseDate, p.ajusteMeses);
@@ -247,14 +270,32 @@ public class PropertyService {
             java.math.BigDecimal precioActual;
 
             if (hasOverride) {
-                // Restore frozen historial from JSON snapshot (past adjustments with old settings)
-                if (p.historialSnapshotJson != null && !p.historialSnapshotJson.isEmpty()) {
-                    try {
-                        AjusteRecord[] records = MAPPER.readValue(p.historialSnapshotJson, AjusteRecord[].class);
-                        historial.addAll(Arrays.asList(records));
-                    } catch (Exception ignored) {}
+                // Auto-calculate history from mesInicio up through mesBaseOverride.
+                // When no manual price override exists, INCLUDE the mesBaseOverride date so
+                // the adjustment that anchors the cycle is captured (e.g. the last auto-advanced date).
+                // When a manual override exists, exclude it — the base price comes from precioBaseOverride.
+                java.math.BigDecimal historicalPrice = p.precio;
+                for (LocalDate adjDate : getPastAdjustmentDates(p.mesInicio, p.ajusteMeses)) {
+                    boolean pastBase = p.precioBaseOverride != null
+                            ? !adjDate.isBefore(p.mesBaseOverride)   // manual override: exclude base date
+                            : adjDate.isAfter(p.mesBaseOverride);    // auto-calculated: include base date
+                    if (pastBase) break;
+                    YearMonth hasta = YearMonth.from(adjDate);
+                    YearMonth desde = hasta.minusMonths(p.ajusteMeses);
+                    java.util.Optional<AjusteInfo> infoOpt =
+                            calcularAjusteConFallback(p.indiceAjuste, desde, hasta, historicalPrice);
+                    if (infoOpt.isPresent()) {
+                        AjusteInfo info = infoOpt.get();
+                        if (!info.estimado) {
+                            historial.add(new AjusteRecord(adjDate, historicalPrice, info.nuevoPrecio, info.coeficiente));
+                        }
+                        historicalPrice = info.nuevoPrecio;
+                    } else {
+                        break;
+                    }
                 }
-                precioActual = p.precioBaseOverride;
+                // Use manual override price if provided; otherwise use the auto-calculated price
+                precioActual = p.precioBaseOverride != null ? p.precioBaseOverride : historicalPrice;
             } else {
                 precioActual = p.precio;
             }

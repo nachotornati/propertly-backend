@@ -3,6 +3,7 @@ package com.propertly;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.propertly.controller.AdminController;
 import com.propertly.controller.ApiController;
 import com.propertly.controller.AuthController;
 import com.propertly.controller.TenantController;
@@ -62,6 +63,7 @@ public class App {
         new AuthController().register(app);
         new TenantController().register(app);
         new ApiController().register(app);
+        new AdminController().register(app);
 
         System.out.println("Propertly backend running on port " + port);
     }

@@ -24,6 +24,7 @@ public class Property {
     public Boolean tenantFactura;
     public Boolean tenantPersonaJuridica;
     public String tenantDocumento; // CUIT if juridica, DNI if fisica
+    public String unidadFuncional; // optional unit identifier, e.g. "Piso 3A", "UF 42"
     public String notes;
     public LocalDateTime createdAt;
 

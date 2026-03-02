@@ -129,3 +129,14 @@ BEGIN
     ALTER TABLE properties ADD COLUMN tenant_documento VARCHAR(20);
   END IF;
 END$$;
+
+-- Migration: add unidad_funcional
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='properties' AND column_name='unidad_funcional'
+  ) THEN
+    ALTER TABLE properties ADD COLUMN unidad_funcional VARCHAR(50);
+  END IF;
+END$$;
