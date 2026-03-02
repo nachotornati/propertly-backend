@@ -35,5 +35,9 @@ public class WhatsAppService {
         if (response.statusCode() != 200) {
             throw new RuntimeException("UltraMsg error " + response.statusCode() + ": " + response.body());
         }
+        // UltraMsg returns 200 even on failure; check "sent":"false" in body
+        if (response.body().contains("\"sent\":\"false\"") || response.body().contains("\"sent\": \"false\"")) {
+            throw new RuntimeException("UltraMsg no pudo enviar el mensaje: " + response.body());
+        }
     }
 }
