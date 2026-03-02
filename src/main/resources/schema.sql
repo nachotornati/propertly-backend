@@ -34,3 +34,14 @@ BEGIN
     ALTER TABLE properties ADD COLUMN provincia VARCHAR(255);
   END IF;
 END$$;
+
+-- Migration: add tenant_phone if not exists
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='properties' AND column_name='tenant_phone'
+  ) THEN
+    ALTER TABLE properties ADD COLUMN tenant_phone VARCHAR(50);
+  END IF;
+END$$;

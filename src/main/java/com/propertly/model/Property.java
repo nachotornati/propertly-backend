@@ -3,6 +3,7 @@ package com.propertly.model;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public class Property {
     public String id;
@@ -11,19 +12,22 @@ public class Property {
     public String provincia;
     public String barrio;
     public String moneda; // "ARS" or "USD"
-    public BigDecimal precio;
+    public BigDecimal precio;       // initial/base price stored in DB
     public LocalDate mesInicio;
     public int ajusteMeses;
     public String indiceAjuste; // "ICL" or "IPC" - only for ARS
     public String tenantName;
+    public String tenantPhone;
     public String notes;
     public LocalDateTime createdAt;
 
     // Calculated fields
+    public BigDecimal precioActual; // accumulated price after all past adjustments
     public LocalDate nextAdjustmentDate;
     public int daysUntilAdjustment;
     public boolean adjustmentDue;
     public AjusteInfo ajusteInfo;
+    public List<AjusteRecord> historialAjustes;
 
     public Property() {}
 }
