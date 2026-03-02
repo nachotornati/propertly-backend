@@ -61,6 +61,21 @@ public class AuthService {
         return null;
     }
 
+    public void resetPassword(String username, String newPassword) throws Exception {
+        String[] userRow = findUserByUsername(username);
+        if (userRow == null) {
+            throw new IllegalArgumentException("No existe un usuario con ese nombre");
+        }
+        String hash = BCrypt.hashpw(newPassword, BCrypt.gensalt());
+        String sql = "UPDATE users SET password_hash = ? WHERE username = ?";
+        try (Connection conn = Database.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, hash);
+            ps.setString(2, username);
+            ps.executeUpdate();
+        }
+    }
+
     public void logout(String token) throws SQLException {
         String sql = "DELETE FROM sessions WHERE token = ?";
         try (Connection conn = Database.getConnection();

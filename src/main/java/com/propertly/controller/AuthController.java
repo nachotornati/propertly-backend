@@ -14,6 +14,7 @@ public class AuthController {
         app.post("/api/auth/register", this::register);
         app.post("/api/auth/login", this::login);
         app.post("/api/auth/logout", this::logout);
+        app.post("/api/auth/reset-password", this::resetPassword);
     }
 
     private void register(Context ctx) {
@@ -54,6 +55,30 @@ public class AuthController {
             ctx.json(authService.login(username.trim(), password));
         } catch (IllegalArgumentException e) {
             ctx.status(401).json(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            ctx.status(500).json(Map.of("error", e.getMessage()));
+        }
+    }
+
+    private void resetPassword(Context ctx) {
+        try {
+            Map<?, ?> body = ctx.bodyAsClass(Map.class);
+            String username = (String) body.get("username");
+            String newPassword = (String) body.get("newPassword");
+
+            if (username == null || username.isBlank() || newPassword == null || newPassword.isBlank()) {
+                ctx.status(400).json(Map.of("error", "Usuario y nueva contraseña son obligatorios"));
+                return;
+            }
+            if (newPassword.length() < 6) {
+                ctx.status(400).json(Map.of("error", "La contraseña debe tener al menos 6 caracteres"));
+                return;
+            }
+
+            authService.resetPassword(username.trim(), newPassword);
+            ctx.status(200).json(Map.of("message", "Contraseña actualizada correctamente"));
+        } catch (IllegalArgumentException e) {
+            ctx.status(404).json(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             ctx.status(500).json(Map.of("error", e.getMessage()));
         }
