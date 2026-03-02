@@ -7,6 +7,9 @@ import com.propertly.service.PropertyService;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
 
+import java.time.YearMonth;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 public class ApiController {
@@ -85,6 +88,8 @@ public class ApiController {
         try {
             Property prop = ctx.bodyAsClass(Property.class);
             prop.agencyId = ctx.pathParam("agencyId");
+            List<String> errors = validateProperty(prop, true);
+            if (!errors.isEmpty()) { ctx.status(400).json(Map.of("error", String.join("; ", errors))); return; }
             ctx.status(201).json(propertyService.create(prop));
         } catch (Exception e) {
             ctx.status(500).json(Map.of("error", e.getMessage()));
@@ -94,12 +99,36 @@ public class ApiController {
     private void updateProperty(Context ctx) {
         try {
             Property prop = ctx.bodyAsClass(Property.class);
+            List<String> errors = validateProperty(prop, false);
+            if (!errors.isEmpty()) { ctx.status(400).json(Map.of("error", String.join("; ", errors))); return; }
             Property updated = propertyService.update(ctx.pathParam("id"), prop);
             if (updated == null) ctx.status(404).json(Map.of("error", "Not found"));
             else ctx.json(updated);
         } catch (Exception e) {
             ctx.status(500).json(Map.of("error", e.getMessage()));
         }
+    }
+
+    /** Returns a list of validation error messages. Empty list = valid. */
+    private List<String> validateProperty(Property prop, boolean isCreate) {
+        List<String> errors = new ArrayList<>();
+        if (isCreate) {
+            if (prop.mesInicio == null) {
+                errors.add("Mes de inicio es requerido");
+            } else if (prop.mesInicio.isAfter(YearMonth.now().atEndOfMonth())) {
+                errors.add("El mes de inicio no puede ser futuro");
+            }
+            if (prop.precio == null || prop.precio.signum() <= 0) {
+                errors.add("El precio debe ser mayor a 0");
+            }
+        }
+        if (prop.ajusteMeses < 1) {
+            errors.add("El período de ajuste debe ser al menos 1 mes");
+        }
+        if (prop.duracionMeses != null && prop.duracionMeses < 1) {
+            errors.add("La duración del contrato debe ser al menos 1 mes");
+        }
+        return errors;
     }
 
     private void deleteProperty(Context ctx) {
