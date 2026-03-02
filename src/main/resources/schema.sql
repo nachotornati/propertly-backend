@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS properties (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     agency_id UUID REFERENCES agencies(id) ON DELETE CASCADE,
     address VARCHAR(500),
+    provincia VARCHAR(255),
     barrio VARCHAR(255) NOT NULL,
     moneda VARCHAR(10) NOT NULL,
     precio DECIMAL(15,2) NOT NULL,
@@ -22,3 +23,14 @@ CREATE TABLE IF NOT EXISTS properties (
     notes TEXT,
     created_at TIMESTAMP DEFAULT NOW()
 );
+
+-- Migration: add provincia if not exists
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='properties' AND column_name='provincia'
+  ) THEN
+    ALTER TABLE properties ADD COLUMN provincia VARCHAR(255);
+  END IF;
+END$$;

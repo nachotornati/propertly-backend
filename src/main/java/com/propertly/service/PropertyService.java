@@ -13,9 +13,9 @@ public class PropertyService {
 
     public List<Property> findAll(String agencyId) throws SQLException {
         List<Property> props = new ArrayList<>();
-        String sql = "SELECT id, agency_id, address, barrio, moneda, precio, mes_inicio, " +
+        String sql = "SELECT id, agency_id, address, provincia, barrio, moneda, precio, mes_inicio, " +
                 "ajuste_meses, indice_ajuste, tenant_name, notes, created_at " +
-                "FROM properties WHERE agency_id = ?::uuid ORDER BY barrio, address";
+                "FROM properties WHERE agency_id = ?::uuid ORDER BY address, barrio";
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, agencyId);
@@ -41,7 +41,7 @@ public class PropertyService {
     }
 
     public Property findById(String id) throws SQLException {
-        String sql = "SELECT id, agency_id, address, barrio, moneda, precio, mes_inicio, " +
+        String sql = "SELECT id, agency_id, address, provincia, barrio, moneda, precio, mes_inicio, " +
                 "ajuste_meses, indice_ajuste, tenant_name, notes, created_at " +
                 "FROM properties WHERE id = ?::uuid";
         try (Connection conn = Database.getConnection();
@@ -55,21 +55,22 @@ public class PropertyService {
     }
 
     public Property create(Property prop) throws SQLException {
-        String sql = "INSERT INTO properties (agency_id, address, barrio, moneda, precio, mes_inicio, " +
+        String sql = "INSERT INTO properties (agency_id, address, provincia, barrio, moneda, precio, mes_inicio, " +
                 "ajuste_meses, indice_ajuste, tenant_name, notes) " +
-                "VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at";
+                "VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at";
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, prop.agencyId);
             ps.setString(2, prop.address);
-            ps.setString(3, prop.barrio);
-            ps.setString(4, prop.moneda);
-            ps.setBigDecimal(5, prop.precio);
-            ps.setDate(6, Date.valueOf(prop.mesInicio));
-            ps.setInt(7, prop.ajusteMeses);
-            ps.setString(8, prop.indiceAjuste);
-            ps.setString(9, prop.tenantName);
-            ps.setString(10, prop.notes);
+            ps.setString(3, prop.provincia);
+            ps.setString(4, prop.barrio);
+            ps.setString(5, prop.moneda);
+            ps.setBigDecimal(6, prop.precio);
+            ps.setDate(7, Date.valueOf(prop.mesInicio));
+            ps.setInt(8, prop.ajusteMeses);
+            ps.setString(9, prop.indiceAjuste);
+            ps.setString(10, prop.tenantName);
+            ps.setString(11, prop.notes);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     prop.id = rs.getString("id");
@@ -81,21 +82,22 @@ public class PropertyService {
     }
 
     public Property update(String id, Property prop) throws SQLException {
-        String sql = "UPDATE properties SET address = ?, barrio = ?, moneda = ?, precio = ?, " +
+        String sql = "UPDATE properties SET address = ?, provincia = ?, barrio = ?, moneda = ?, precio = ?, " +
                 "mes_inicio = ?, ajuste_meses = ?, indice_ajuste = ?, tenant_name = ?, notes = ? " +
                 "WHERE id = ?::uuid";
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, prop.address);
-            ps.setString(2, prop.barrio);
-            ps.setString(3, prop.moneda);
-            ps.setBigDecimal(4, prop.precio);
-            ps.setDate(5, Date.valueOf(prop.mesInicio));
-            ps.setInt(6, prop.ajusteMeses);
-            ps.setString(7, prop.indiceAjuste);
-            ps.setString(8, prop.tenantName);
-            ps.setString(9, prop.notes);
-            ps.setString(10, id);
+            ps.setString(2, prop.provincia);
+            ps.setString(3, prop.barrio);
+            ps.setString(4, prop.moneda);
+            ps.setBigDecimal(5, prop.precio);
+            ps.setDate(6, Date.valueOf(prop.mesInicio));
+            ps.setInt(7, prop.ajusteMeses);
+            ps.setString(8, prop.indiceAjuste);
+            ps.setString(9, prop.tenantName);
+            ps.setString(10, prop.notes);
+            ps.setString(11, id);
             ps.executeUpdate();
         }
         return findById(id);
@@ -115,6 +117,7 @@ public class PropertyService {
         p.id = rs.getString("id");
         p.agencyId = rs.getString("agency_id");
         p.address = rs.getString("address");
+        p.provincia = rs.getString("provincia");
         p.barrio = rs.getString("barrio");
         p.moneda = rs.getString("moneda");
         p.precio = rs.getBigDecimal("precio");

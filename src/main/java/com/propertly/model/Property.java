@@ -8,6 +8,7 @@ public class Property {
     public String id;
     public String agencyId;
     public String address;
+    public String provincia;
     public String barrio;
     public String moneda; // "ARS" or "USD"
     public BigDecimal precio;
