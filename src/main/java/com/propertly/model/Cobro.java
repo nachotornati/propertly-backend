@@ -12,6 +12,7 @@ public class Cobro {
     public BigDecimal montoBase;
     public BigDecimal montoTotal;
     public boolean pagado;
+    public boolean vencido;
     public LocalDate fechaPago;
     public String notes;
     public LocalDateTime createdAt;

@@ -19,7 +19,7 @@ public class CobroService {
 
     public List<Cobro> findByProperty(String propertyId) throws SQLException {
         List<Cobro> cobros = new ArrayList<>();
-        String sql = "SELECT id, property_id, mes, monto_base, monto_total, pagado, fecha_pago, notes, created_at " +
+        String sql = "SELECT id, property_id, mes, monto_base, monto_total, pagado, vencido, fecha_pago, notes, created_at " +
                 "FROM cobros WHERE property_id = ?::uuid ORDER BY mes DESC";
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -35,7 +35,7 @@ public class CobroService {
     public List<Cobro> findCurrentMesByAgency(String agencyId) throws SQLException {
         Date mesActual = Date.valueOf(YearMonth.now().atDay(1));
         List<Cobro> cobros = new ArrayList<>();
-        String sql = "SELECT c.id, c.property_id, c.mes, c.monto_base, c.monto_total, c.pagado, c.fecha_pago, c.notes, c.created_at " +
+        String sql = "SELECT c.id, c.property_id, c.mes, c.monto_base, c.monto_total, c.pagado, c.vencido, c.fecha_pago, c.notes, c.created_at " +
                 "FROM cobros c JOIN properties p ON c.property_id = p.id " +
                 "WHERE p.agency_id = ?::uuid AND c.mes = ?";
         try (Connection conn = Database.getConnection();
@@ -51,7 +51,7 @@ public class CobroService {
     }
 
     public Cobro findById(String id) throws SQLException {
-        String sql = "SELECT id, property_id, mes, monto_base, monto_total, pagado, fecha_pago, notes, created_at " +
+        String sql = "SELECT id, property_id, mes, monto_base, monto_total, pagado, vencido, fecha_pago, notes, created_at " +
                 "FROM cobros WHERE id = ?::uuid";
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -69,8 +69,8 @@ public class CobroService {
 
     public Cobro create(Cobro cobro) throws SQLException {
         cobro.montoTotal = calcTotal(cobro);
-        String sql = "INSERT INTO cobros (property_id, mes, monto_base, monto_total, pagado, fecha_pago, notes) " +
-                "VALUES (?::uuid, ?, ?, ?, ?, ?, ?) RETURNING id, created_at";
+        String sql = "INSERT INTO cobros (property_id, mes, monto_base, monto_total, pagado, fecha_pago, notes, vencido) " +
+                "VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at";
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, cobro.propertyId);
@@ -80,6 +80,7 @@ public class CobroService {
             ps.setBoolean(5, cobro.pagado);
             ps.setDate(6, cobro.fechaPago != null ? Date.valueOf(cobro.fechaPago) : null);
             ps.setString(7, cobro.notes);
+            ps.setBoolean(8, cobro.vencido);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     cobro.id = rs.getString("id");
@@ -93,7 +94,7 @@ public class CobroService {
 
     public Cobro update(String id, Cobro cobro) throws SQLException {
         cobro.montoTotal = calcTotal(cobro);
-        String sql = "UPDATE cobros SET mes = ?, monto_base = ?, monto_total = ?, pagado = ?, fecha_pago = ?, notes = ? " +
+        String sql = "UPDATE cobros SET mes = ?, monto_base = ?, monto_total = ?, pagado = ?, fecha_pago = ?, notes = ?, vencido = ? " +
                 "WHERE id = ?::uuid";
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -103,7 +104,8 @@ public class CobroService {
             ps.setBoolean(4, cobro.pagado);
             ps.setDate(5, cobro.fechaPago != null ? Date.valueOf(cobro.fechaPago) : null);
             ps.setString(6, cobro.notes);
-            ps.setString(7, id);
+            ps.setBoolean(7, cobro.vencido);
+            ps.setString(8, id);
             ps.executeUpdate();
         }
         deleteExtras(id);
@@ -182,7 +184,7 @@ public class CobroService {
 
         // Fetch all cobros in lookback window for this agency
         Map<String, Map<LocalDate, Cobro>> cobroMap = new HashMap<>();
-        String sql = "SELECT c.id, c.property_id, c.mes, c.monto_base, c.monto_total, c.pagado, c.fecha_pago, c.notes, c.created_at " +
+        String sql = "SELECT c.id, c.property_id, c.mes, c.monto_base, c.monto_total, c.pagado, c.vencido, c.fecha_pago, c.notes, c.created_at " +
                 "FROM cobros c JOIN properties p ON c.property_id = p.id " +
                 "WHERE p.agency_id = ?::uuid AND c.mes >= ? AND c.mes < ?";
         try (Connection conn = Database.getConnection();
@@ -246,6 +248,7 @@ public class CobroService {
         c.montoBase = rs.getBigDecimal("monto_base");
         c.montoTotal = rs.getBigDecimal("monto_total");
         c.pagado = rs.getBoolean("pagado");
+        c.vencido = rs.getBoolean("vencido");
         Date fp = rs.getDate("fecha_pago");
         c.fechaPago = fp != null ? fp.toLocalDate() : null;
         c.notes = rs.getString("notes");

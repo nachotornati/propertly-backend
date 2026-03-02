@@ -140,3 +140,14 @@ BEGIN
     ALTER TABLE properties ADD COLUMN unidad_funcional VARCHAR(50);
   END IF;
 END$$;
+
+-- Migration: add vencido to cobros
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='cobros' AND column_name='vencido'
+  ) THEN
+    ALTER TABLE cobros ADD COLUMN vencido BOOLEAN NOT NULL DEFAULT false;
+  END IF;
+END$$;
