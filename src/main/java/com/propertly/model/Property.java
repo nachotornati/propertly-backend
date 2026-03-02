@@ -20,6 +20,10 @@ public class Property {
     public String indiceAjuste; // "ICL" or "IPC" - only for ARS
     public String tenantName;
     public String tenantPhone;
+    public String tenantEmail;
+    public Boolean tenantFactura;
+    public Boolean tenantPersonaJuridica;
+    public String tenantDocumento; // CUIT if juridica, DNI if fisica
     public String notes;
     public LocalDateTime createdAt;
 
@@ -35,6 +39,10 @@ public class Property {
     @com.fasterxml.jackson.annotation.JsonIgnore public BigDecimal precioBaseOverride;
     @com.fasterxml.jackson.annotation.JsonIgnore public LocalDate mesBaseOverride;
     @com.fasterxml.jackson.annotation.JsonIgnore public String historialSnapshotJson;
+
+    // Input-only fields for "contract already started" creation — not stored directly
+    public BigDecimal precioActualInput;
+    public String proximoMesAjusteInput; // "YYYY-MM"
 
     public Property() {}
 }

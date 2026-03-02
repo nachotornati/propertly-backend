@@ -115,3 +115,17 @@ BEGIN
     ALTER TABLE properties ADD COLUMN historial_snapshot JSONB;
   END IF;
 END$$;
+
+-- Migration: add tenant contact/fiscal fields
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='properties' AND column_name='tenant_email'
+  ) THEN
+    ALTER TABLE properties ADD COLUMN tenant_email VARCHAR(255);
+    ALTER TABLE properties ADD COLUMN tenant_factura BOOLEAN DEFAULT false;
+    ALTER TABLE properties ADD COLUMN tenant_persona_juridica BOOLEAN DEFAULT false;
+    ALTER TABLE properties ADD COLUMN tenant_documento VARCHAR(20);
+  END IF;
+END$$;

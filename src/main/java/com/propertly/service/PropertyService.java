@@ -20,7 +20,8 @@ import java.util.Objects;
 public class PropertyService {
 
     private static final String SELECT_COLS = "id, agency_id, address, provincia, barrio, moneda, precio, mes_inicio, " +
-            "ajuste_meses, duracion_meses, indice_ajuste, tenant_name, tenant_phone, notes, created_at, tenant_token, " +
+            "ajuste_meses, duracion_meses, indice_ajuste, tenant_name, tenant_phone, tenant_email, tenant_factura, " +
+            "tenant_persona_juridica, tenant_documento, notes, created_at, tenant_token, " +
             "precio_base_override, mes_base_override, historial_snapshot";
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
@@ -79,9 +80,21 @@ public class PropertyService {
     }
 
     public Property create(Property prop) throws SQLException {
+        // If contract already started and user provided current price + next adjustment month, set overrides
+        if (prop.precioActualInput != null && prop.proximoMesAjusteInput != null && !prop.proximoMesAjusteInput.isBlank()) {
+            YearMonth proximoMes = YearMonth.parse(prop.proximoMesAjusteInput);
+            prop.mesBaseOverride = proximoMes.minusMonths(prop.ajusteMeses).atDay(1);
+            prop.precioBaseOverride = prop.precioActualInput;
+        }
+
+        boolean hasOverride = prop.precioBaseOverride != null && prop.mesBaseOverride != null;
         String sql = "INSERT INTO properties (agency_id, address, provincia, barrio, moneda, precio, mes_inicio, " +
-                "ajuste_meses, duracion_meses, indice_ajuste, tenant_name, tenant_phone, notes) " +
-                "VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at";
+                "ajuste_meses, duracion_meses, indice_ajuste, tenant_name, tenant_phone, tenant_email, " +
+                "tenant_factura, tenant_persona_juridica, tenant_documento, notes" +
+                (hasOverride ? ", precio_base_override, mes_base_override, historial_snapshot" : "") +
+                ") VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?" +
+                (hasOverride ? ", ?, ?, ?::jsonb" : "") +
+                ") RETURNING id, created_at";
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, prop.agencyId);
@@ -97,7 +110,18 @@ public class PropertyService {
             ps.setString(10, prop.indiceAjuste);
             ps.setString(11, prop.tenantName);
             ps.setString(12, prop.tenantPhone);
-            ps.setString(13, prop.notes);
+            ps.setString(13, prop.tenantEmail);
+            if (prop.tenantFactura != null) ps.setBoolean(14, prop.tenantFactura);
+            else ps.setNull(14, java.sql.Types.BOOLEAN);
+            if (prop.tenantPersonaJuridica != null) ps.setBoolean(15, prop.tenantPersonaJuridica);
+            else ps.setNull(15, java.sql.Types.BOOLEAN);
+            ps.setString(16, prop.tenantDocumento);
+            ps.setString(17, prop.notes);
+            if (hasOverride) {
+                ps.setBigDecimal(18, prop.precioBaseOverride);
+                ps.setDate(19, Date.valueOf(prop.mesBaseOverride));
+                ps.setString(20, "[]");
+            }
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     prop.id = rs.getString("id");
@@ -134,7 +158,8 @@ public class PropertyService {
 
         // moneda, precio, mes_inicio are NOT updated — locked after creation
         String sql = "UPDATE properties SET address = ?, provincia = ?, barrio = ?, " +
-                "ajuste_meses = ?, duracion_meses = ?, indice_ajuste = ?, tenant_name = ?, tenant_phone = ?, notes = ?" +
+                "ajuste_meses = ?, duracion_meses = ?, indice_ajuste = ?, tenant_name = ?, tenant_phone = ?, " +
+                "tenant_email = ?, tenant_factura = ?, tenant_persona_juridica = ?, tenant_documento = ?, notes = ?" +
                 (settingsChanged ? ", precio_base_override = ?, mes_base_override = ?, historial_snapshot = ?::jsonb" : "") +
                 " WHERE id = ?::uuid";
 
@@ -149,15 +174,21 @@ public class PropertyService {
             ps.setString(6, prop.indiceAjuste);
             ps.setString(7, prop.tenantName);
             ps.setString(8, prop.tenantPhone);
-            ps.setString(9, prop.notes);
+            ps.setString(9, prop.tenantEmail);
+            if (prop.tenantFactura != null) ps.setBoolean(10, prop.tenantFactura);
+            else ps.setNull(10, java.sql.Types.BOOLEAN);
+            if (prop.tenantPersonaJuridica != null) ps.setBoolean(11, prop.tenantPersonaJuridica);
+            else ps.setNull(11, java.sql.Types.BOOLEAN);
+            ps.setString(12, prop.tenantDocumento);
+            ps.setString(13, prop.notes);
             if (settingsChanged) {
-                if (newPrecioBase != null) ps.setBigDecimal(10, newPrecioBase);
-                else ps.setNull(10, java.sql.Types.DECIMAL);
-                ps.setDate(11, newMesBase);
-                ps.setString(12, newHistorialJson);
-                ps.setString(13, id);
+                if (newPrecioBase != null) ps.setBigDecimal(14, newPrecioBase);
+                else ps.setNull(14, java.sql.Types.DECIMAL);
+                ps.setDate(15, newMesBase);
+                ps.setString(16, newHistorialJson);
+                ps.setString(17, id);
             } else {
-                ps.setString(10, id);
+                ps.setString(14, id);
             }
             ps.executeUpdate();
         }
@@ -189,6 +220,10 @@ public class PropertyService {
         p.indiceAjuste = rs.getString("indice_ajuste");
         p.tenantName = rs.getString("tenant_name");
         p.tenantPhone = rs.getString("tenant_phone");
+        p.tenantEmail = rs.getString("tenant_email");
+        boolean tf = rs.getBoolean("tenant_factura"); p.tenantFactura = rs.wasNull() ? null : tf;
+        boolean tpj = rs.getBoolean("tenant_persona_juridica"); p.tenantPersonaJuridica = rs.wasNull() ? null : tpj;
+        p.tenantDocumento = rs.getString("tenant_documento");
         p.notes = rs.getString("notes");
         p.createdAt = rs.getTimestamp("created_at").toLocalDateTime();
         p.tenantToken = rs.getString("tenant_token");
