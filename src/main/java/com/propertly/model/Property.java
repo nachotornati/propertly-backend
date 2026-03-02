@@ -15,6 +15,8 @@ public class Property {
     public BigDecimal precio;       // initial/base price stored in DB
     public LocalDate mesInicio;
     public int ajusteMeses;
+    public Integer duracionMeses; // total contract duration in months (optional)
+    public String tenantToken;   // public share token
     public String indiceAjuste; // "ICL" or "IPC" - only for ARS
     public String tenantName;
     public String tenantPhone;
@@ -28,6 +30,11 @@ public class Property {
     public boolean adjustmentDue;
     public AjusteInfo ajusteInfo;
     public List<AjusteRecord> historialAjustes;
+
+    // Internal override fields — stored in DB to preserve history when settings change, not sent to frontend
+    @com.fasterxml.jackson.annotation.JsonIgnore public BigDecimal precioBaseOverride;
+    @com.fasterxml.jackson.annotation.JsonIgnore public LocalDate mesBaseOverride;
+    @com.fasterxml.jackson.annotation.JsonIgnore public String historialSnapshotJson;
 
     public Property() {}
 }

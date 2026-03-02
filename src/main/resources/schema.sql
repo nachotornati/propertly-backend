@@ -50,6 +50,26 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at TIMESTAMP NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS cobros (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    property_id UUID REFERENCES properties(id) ON DELETE CASCADE,
+    mes DATE NOT NULL,
+    monto_base DECIMAL(15,2) NOT NULL,
+    monto_total DECIMAL(15,2) NOT NULL,
+    pagado BOOLEAN NOT NULL DEFAULT false,
+    fecha_pago DATE,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(property_id, mes)
+);
+
+CREATE TABLE IF NOT EXISTS cobro_extras (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cobro_id UUID REFERENCES cobros(id) ON DELETE CASCADE,
+    descripcion VARCHAR(255) NOT NULL,
+    monto DECIMAL(15,2) NOT NULL
+);
+
 -- Migration: add tenant_phone if not exists
 DO $$
 BEGIN
@@ -58,5 +78,40 @@ BEGIN
     WHERE table_name='properties' AND column_name='tenant_phone'
   ) THEN
     ALTER TABLE properties ADD COLUMN tenant_phone VARCHAR(50);
+  END IF;
+END$$;
+
+-- Migration: add tenant_token if not exists
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='properties' AND column_name='tenant_token'
+  ) THEN
+    ALTER TABLE properties ADD COLUMN tenant_token UUID DEFAULT gen_random_uuid() NOT NULL;
+  END IF;
+END$$;
+
+-- Migration: add duracion_meses if not exists
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='properties' AND column_name='duracion_meses'
+  ) THEN
+    ALTER TABLE properties ADD COLUMN duracion_meses INTEGER;
+  END IF;
+END$$;
+
+-- Migration: add adjustment override columns for preserving historical calculations
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name='properties' AND column_name='precio_base_override'
+  ) THEN
+    ALTER TABLE properties ADD COLUMN precio_base_override DECIMAL(15,2);
+    ALTER TABLE properties ADD COLUMN mes_base_override DATE;
+    ALTER TABLE properties ADD COLUMN historial_snapshot JSONB;
   END IF;
 END$$;

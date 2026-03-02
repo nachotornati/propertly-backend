@@ -9,6 +9,8 @@ public class AjusteRecord {
     public BigDecimal precioAhora;
     public BigDecimal coeficiente;
 
+    public AjusteRecord() {}
+
     public AjusteRecord(LocalDate fecha, BigDecimal precioAntes, BigDecimal precioAhora, BigDecimal coeficiente) {
         this.fecha = fecha;
         this.precioAntes = precioAntes;

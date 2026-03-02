@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.propertly.controller.ApiController;
 import com.propertly.controller.AuthController;
+import com.propertly.controller.TenantController;
 import com.propertly.db.Database;
 import com.propertly.service.AuthService;
 import io.javalin.Javalin;
@@ -38,9 +39,10 @@ public class App {
             });
         }).start(port);
 
-        // Auth middleware — protects all /api/* except /api/auth/*
+        // Auth middleware — protects all /api/* except /api/auth/* and /api/public/*
         app.before("/api/*", ctx -> {
             if (ctx.path().startsWith("/api/auth/")) return;
+            if (ctx.path().startsWith("/api/public/")) return;
             String header = ctx.header("Authorization");
             if (header == null || !header.startsWith("Bearer ")) {
                 ctx.status(401).json(Map.of("error", "No autorizado"));
@@ -57,6 +59,7 @@ public class App {
         });
 
         new AuthController().register(app);
+        new TenantController().register(app);
         new ApiController().register(app);
 
         System.out.println("Propertly backend running on port " + port);

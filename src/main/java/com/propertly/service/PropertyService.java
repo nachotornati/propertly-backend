@@ -1,5 +1,8 @@
 package com.propertly.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.propertly.db.Database;
 import com.propertly.model.AjusteInfo;
 import com.propertly.model.AjusteRecord;
@@ -10,15 +13,23 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 public class PropertyService {
 
+    private static final String SELECT_COLS = "id, agency_id, address, provincia, barrio, moneda, precio, mes_inicio, " +
+            "ajuste_meses, duracion_meses, indice_ajuste, tenant_name, tenant_phone, notes, created_at, tenant_token, " +
+            "precio_base_override, mes_base_override, historial_snapshot";
+
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
     public List<Property> findAll(String agencyId) throws SQLException {
         List<Property> props = new ArrayList<>();
-        String sql = "SELECT id, agency_id, address, provincia, barrio, moneda, precio, mes_inicio, " +
-                "ajuste_meses, indice_ajuste, tenant_name, tenant_phone, notes, created_at " +
-                "FROM properties WHERE agency_id = ?::uuid ORDER BY address, barrio";
+        String sql = "SELECT " + SELECT_COLS + " FROM properties WHERE agency_id = ?::uuid ORDER BY address, barrio";
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, agencyId);
@@ -44,9 +55,7 @@ public class PropertyService {
     }
 
     public Property findById(String id) throws SQLException {
-        String sql = "SELECT id, agency_id, address, provincia, barrio, moneda, precio, mes_inicio, " +
-                "ajuste_meses, indice_ajuste, tenant_name, tenant_phone, notes, created_at " +
-                "FROM properties WHERE id = ?::uuid";
+        String sql = "SELECT " + SELECT_COLS + " FROM properties WHERE id = ?::uuid";
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, id);
@@ -57,10 +66,22 @@ public class PropertyService {
         return null;
     }
 
+    public Property findByToken(String token) throws SQLException {
+        String sql = "SELECT " + SELECT_COLS + " FROM properties WHERE tenant_token = ?::uuid";
+        try (Connection conn = Database.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, token);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return mapAndCalculate(rs);
+            }
+        }
+        return null;
+    }
+
     public Property create(Property prop) throws SQLException {
         String sql = "INSERT INTO properties (agency_id, address, provincia, barrio, moneda, precio, mes_inicio, " +
-                "ajuste_meses, indice_ajuste, tenant_name, tenant_phone, notes) " +
-                "VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at";
+                "ajuste_meses, duracion_meses, indice_ajuste, tenant_name, tenant_phone, notes) " +
+                "VALUES (?::uuid, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at";
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, prop.agencyId);
@@ -71,10 +92,12 @@ public class PropertyService {
             ps.setBigDecimal(6, prop.precio);
             ps.setDate(7, Date.valueOf(prop.mesInicio));
             ps.setInt(8, prop.ajusteMeses);
-            ps.setString(9, prop.indiceAjuste);
-            ps.setString(10, prop.tenantName);
-            ps.setString(11, prop.tenantPhone);
-            ps.setString(12, prop.notes);
+            if (prop.duracionMeses != null) ps.setInt(9, prop.duracionMeses);
+            else ps.setNull(9, java.sql.Types.INTEGER);
+            ps.setString(10, prop.indiceAjuste);
+            ps.setString(11, prop.tenantName);
+            ps.setString(12, prop.tenantPhone);
+            ps.setString(13, prop.notes);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     prop.id = rs.getString("id");
@@ -86,23 +109,56 @@ public class PropertyService {
     }
 
     public Property update(String id, Property prop) throws SQLException {
-        String sql = "UPDATE properties SET address = ?, provincia = ?, barrio = ?, moneda = ?, precio = ?, " +
-                "mes_inicio = ?, ajuste_meses = ?, indice_ajuste = ?, tenant_name = ?, tenant_phone = ?, notes = ? " +
-                "WHERE id = ?::uuid";
+        Property current = findById(id);
+
+        // Detect if adjustment settings changed — if so, freeze current historial to preserve past calculations
+        boolean settingsChanged = current != null && "ARS".equals(current.moneda)
+                && current.indiceAjuste != null
+                && (prop.ajusteMeses != current.ajusteMeses
+                    || !Objects.equals(prop.indiceAjuste, current.indiceAjuste));
+
+        java.math.BigDecimal newPrecioBase = null;
+        Date newMesBase = null;
+        String newHistorialJson = null;
+
+        if (settingsChanged && current.precioActual != null) {
+            newPrecioBase = current.precioActual;
+            newMesBase = Date.valueOf(LocalDate.now().withDayOfMonth(1));
+            try {
+                newHistorialJson = MAPPER.writeValueAsString(
+                        current.historialAjustes != null ? current.historialAjustes : new ArrayList<>());
+            } catch (Exception e) {
+                newHistorialJson = "[]";
+            }
+        }
+
+        // moneda, precio, mes_inicio are NOT updated — locked after creation
+        String sql = "UPDATE properties SET address = ?, provincia = ?, barrio = ?, " +
+                "ajuste_meses = ?, duracion_meses = ?, indice_ajuste = ?, tenant_name = ?, tenant_phone = ?, notes = ?" +
+                (settingsChanged ? ", precio_base_override = ?, mes_base_override = ?, historial_snapshot = ?::jsonb" : "") +
+                " WHERE id = ?::uuid";
+
         try (Connection conn = Database.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, prop.address);
             ps.setString(2, prop.provincia);
             ps.setString(3, prop.barrio);
-            ps.setString(4, prop.moneda);
-            ps.setBigDecimal(5, prop.precio);
-            ps.setDate(6, Date.valueOf(prop.mesInicio));
-            ps.setInt(7, prop.ajusteMeses);
-            ps.setString(8, prop.indiceAjuste);
-            ps.setString(9, prop.tenantName);
-            ps.setString(10, prop.tenantPhone);
-            ps.setString(11, prop.notes);
-            ps.setString(12, id);
+            ps.setInt(4, prop.ajusteMeses);
+            if (prop.duracionMeses != null) ps.setInt(5, prop.duracionMeses);
+            else ps.setNull(5, java.sql.Types.INTEGER);
+            ps.setString(6, prop.indiceAjuste);
+            ps.setString(7, prop.tenantName);
+            ps.setString(8, prop.tenantPhone);
+            ps.setString(9, prop.notes);
+            if (settingsChanged) {
+                if (newPrecioBase != null) ps.setBigDecimal(10, newPrecioBase);
+                else ps.setNull(10, java.sql.Types.DECIMAL);
+                ps.setDate(11, newMesBase);
+                ps.setString(12, newHistorialJson);
+                ps.setString(13, id);
+            } else {
+                ps.setString(10, id);
+            }
             ps.executeUpdate();
         }
         return findById(id);
@@ -128,59 +184,79 @@ public class PropertyService {
         p.precio = rs.getBigDecimal("precio");
         p.mesInicio = rs.getDate("mes_inicio").toLocalDate();
         p.ajusteMeses = rs.getInt("ajuste_meses");
+        int dm = rs.getInt("duracion_meses");
+        p.duracionMeses = rs.wasNull() ? null : dm;
         p.indiceAjuste = rs.getString("indice_ajuste");
         p.tenantName = rs.getString("tenant_name");
         p.tenantPhone = rs.getString("tenant_phone");
         p.notes = rs.getString("notes");
         p.createdAt = rs.getTimestamp("created_at").toLocalDateTime();
+        p.tenantToken = rs.getString("tenant_token");
+
+        // Read override columns
+        java.math.BigDecimal precioBaseOverride = rs.getBigDecimal("precio_base_override");
+        if (!rs.wasNull()) p.precioBaseOverride = precioBaseOverride;
+        Date mesBaseOverrideDate = rs.getDate("mes_base_override");
+        if (mesBaseOverrideDate != null) p.mesBaseOverride = mesBaseOverrideDate.toLocalDate();
+        p.historialSnapshotJson = rs.getString("historial_snapshot");
 
         if ("ARS".equals(p.moneda) && p.indiceAjuste != null) {
-            p.nextAdjustmentDate = calculateNextAdjustment(p.mesInicio, p.ajusteMeses);
+            boolean hasOverride = p.precioBaseOverride != null && p.mesBaseOverride != null;
+            LocalDate baseDate = hasOverride ? p.mesBaseOverride : p.mesInicio;
+
+            p.nextAdjustmentDate = calculateNextAdjustment(baseDate, p.ajusteMeses);
             p.daysUntilAdjustment = (int) ChronoUnit.DAYS.between(LocalDate.now(), p.nextAdjustmentDate);
             p.adjustmentDue = p.daysUntilAdjustment <= 0;
 
-            // Compute all past adjustments to derive the current accumulated price
             List<AjusteRecord> historial = new ArrayList<>();
-            java.math.BigDecimal precioActual = p.precio;
+            java.math.BigDecimal precioActual;
 
-            for (LocalDate adjDate : getPastAdjustmentDates(p.mesInicio, p.ajusteMeses)) {
+            if (hasOverride) {
+                // Restore frozen historial from JSON snapshot (past adjustments with old settings)
+                if (p.historialSnapshotJson != null && !p.historialSnapshotJson.isEmpty()) {
+                    try {
+                        AjusteRecord[] records = MAPPER.readValue(p.historialSnapshotJson, AjusteRecord[].class);
+                        historial.addAll(Arrays.asList(records));
+                    } catch (Exception ignored) {}
+                }
+                precioActual = p.precioBaseOverride;
+            } else {
+                precioActual = p.precio;
+            }
+
+            // Calculate adjustments from baseDate onwards with current settings
+            for (LocalDate adjDate : getPastAdjustmentDates(baseDate, p.ajusteMeses)) {
                 YearMonth hasta = YearMonth.from(adjDate);
                 YearMonth desde = hasta.minusMonths(p.ajusteMeses);
                 java.util.Optional<AjusteInfo> infoOpt =
-                        IndiceService.getInstance().calcularAjuste(p.indiceAjuste, desde, hasta, precioActual);
+                        calcularAjusteConFallback(p.indiceAjuste, desde, hasta, precioActual);
                 if (infoOpt.isPresent()) {
                     AjusteInfo info = infoOpt.get();
                     if (!info.estimado) {
-                        // Only record confirmed (non-estimated) past adjustments in history
                         historial.add(new AjusteRecord(adjDate, precioActual, info.nuevoPrecio, info.coeficiente));
                     }
                     precioActual = info.nuevoPrecio;
                 } else {
-                    break; // can't continue without index data
+                    break;
                 }
             }
 
             p.precioActual = precioActual;
             p.historialAjustes = historial;
 
-            // Next adjustment estimate uses the accumulated current price as base
             YearMonth hastaNext = YearMonth.from(p.nextAdjustmentDate);
             YearMonth desdeNext = hastaNext.minusMonths(p.ajusteMeses);
-            p.ajusteInfo = IndiceService.getInstance()
-                    .calcularAjuste(p.indiceAjuste, desdeNext, hastaNext, precioActual)
+            p.ajusteInfo = calcularAjusteConFallback(p.indiceAjuste, desdeNext, hastaNext, precioActual)
                     .orElse(null);
         }
 
         return p;
     }
 
-    /**
-     * Returns all past adjustment dates (already passed, from first adjustment up to today).
-     */
-    private List<LocalDate> getPastAdjustmentDates(LocalDate mesInicio, int ajusteMeses) {
+    private List<LocalDate> getPastAdjustmentDates(LocalDate baseDate, int ajusteMeses) {
         List<LocalDate> past = new ArrayList<>();
         LocalDate today = LocalDate.now();
-        LocalDate candidate = mesInicio.withDayOfMonth(1).plusMonths(ajusteMeses);
+        LocalDate candidate = baseDate.withDayOfMonth(1).plusMonths(ajusteMeses);
         while (!candidate.isAfter(today)) {
             past.add(candidate);
             candidate = candidate.plusMonths(ajusteMeses);
@@ -188,12 +264,29 @@ public class PropertyService {
         return past;
     }
 
-    private LocalDate calculateNextAdjustment(LocalDate mesInicio, int ajusteMeses) {
+    private LocalDate calculateNextAdjustment(LocalDate baseDate, int ajusteMeses) {
         LocalDate today = LocalDate.now();
-        LocalDate candidate = mesInicio.withDayOfMonth(1);
+        LocalDate candidate = baseDate.withDayOfMonth(1);
         while (!candidate.isAfter(today)) {
             candidate = candidate.plusMonths(ajusteMeses);
         }
         return candidate;
+    }
+
+    /**
+     * If the requested window has estimated (unpublished) months, fall back to the
+     * previous window (shifted back 1 month) which uses only real published data.
+     */
+    private java.util.Optional<AjusteInfo> calcularAjusteConFallback(
+            String indice, YearMonth desde, YearMonth hasta, java.math.BigDecimal precio) {
+        java.util.Optional<AjusteInfo> result = IndiceService.getInstance().calcularAjuste(indice, desde, hasta, precio);
+        if (result.isPresent() && result.get().estimado) {
+            java.util.Optional<AjusteInfo> fallback = IndiceService.getInstance()
+                    .calcularAjuste(indice, desde.minusMonths(1), hasta.minusMonths(1), precio);
+            if (fallback.isPresent() && !fallback.get().estimado) {
+                return fallback;
+            }
+        }
+        return result;
     }
 }

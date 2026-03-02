@@ -13,8 +13,10 @@ public class ApiController {
 
     private final AgencyService agencyService = new AgencyService();
     private final PropertyService propertyService = new PropertyService();
+    private final CobroController cobroController = new CobroController();
 
     public void register(Javalin app) {
+        cobroController.register(app);
         // Health check
         app.get("/health", ctx -> ctx.json(Map.of("status", "ok")));
 
